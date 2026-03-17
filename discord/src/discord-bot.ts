@@ -454,8 +454,18 @@ export async function startDiscordBot({
       // When mention mode is enabled, users without Kimaki role can message
       // without getting a permission error - we just silently ignore.
       const channel = message.channel
+      let textChannelConfig:
+        | Awaited<ReturnType<typeof getChannelDirectory>>
+        | undefined
       if (channel.type === ChannelType.GuildText && !isCliInjectedPrompt) {
         const textChannel = channel as TextChannel
+        textChannelConfig = await getChannelDirectory(textChannel.id)
+        if (!textChannelConfig) {
+          voiceLogger.log(
+            `[IGNORED] Channel #${textChannel.name} has no project directory configured`,
+          )
+          return
+        }
         const mentionModeEnabled = await getChannelMentionMode(textChannel.id)
         if (mentionModeEnabled) {
           const botMentioned =
@@ -465,6 +475,33 @@ export async function startDiscordBot({
             voiceLogger.log(`[IGNORED] Mention mode enabled, bot not mentioned`)
             return
           }
+        }
+      }
+
+      const isThread = [
+        ChannelType.PublicThread,
+        ChannelType.PrivateThread,
+        ChannelType.AnnouncementThread,
+      ].includes(channel.type)
+
+      let threadChannelConfig:
+        | Awaited<ReturnType<typeof getChannelDirectory>>
+        | undefined
+      if (isThread) {
+        const thread = channel as ThreadChannel
+        const parent = thread.parent as TextChannel | null
+        if (!parent || parent.type !== ChannelType.GuildText) {
+          discordLogger.log(
+            `Cannot process message: parent channel is not a guild text channel for thread ${thread.id}`,
+          )
+          return
+        }
+        threadChannelConfig = await getChannelDirectory(parent.id)
+        if (!threadChannelConfig) {
+          discordLogger.log(
+            `Cannot process message: parent channel is not configured as a project for thread ${thread.id}`,
+          )
+          return
         }
       }
 
@@ -486,24 +523,12 @@ export async function startDiscordBot({
         }
       }
 
-      const isThread = [
-        ChannelType.PublicThread,
-        ChannelType.PrivateThread,
-        ChannelType.AnnouncementThread,
-      ].includes(channel.type)
-
       if (isThread) {
         const thread = channel as ThreadChannel
         discordLogger.log(`Message in thread ${thread.name} (${thread.id})`)
 
         const parent = thread.parent as TextChannel | null
-        let projectDirectory: string | undefined
-        if (parent) {
-          const channelConfig = await getChannelDirectory(parent.id)
-          if (channelConfig) {
-            projectDirectory = channelConfig.directory
-          }
-        }
+        let projectDirectory: string | undefined = threadChannelConfig?.directory
 
         // Check if this thread is a worktree thread
         const worktreeInfo = await getThreadWorktree(thread.id)
@@ -653,23 +678,9 @@ export async function startDiscordBot({
           `[GUILD_TEXT] Message in text channel #${textChannel.name} (${textChannel.id})`,
         )
 
-        const channelConfig = await getChannelDirectory(textChannel.id)
-
+        const channelConfig =
+          textChannelConfig || (await getChannelDirectory(textChannel.id))
         if (!channelConfig) {
-          const botMentioned = Boolean(
-            discordClient.user && message.mentions.has(discordClient.user.id),
-          )
-          if (botMentioned) {
-            // TODO: Consider creating/using a session for any text channel when Kimaki is
-            // explicitly @mentioned, so the bot can answer quick questions even before
-            // the channel is linked to a project.
-            await message.reply({
-              content:
-                'This channel is not connected to an OpenCode project.\nSend your message in a project channel, or use `/add-project` for an existing project, or `/create-new-project` to make a new one.',
-              flags: SILENT_MESSAGE_FLAGS,
-            })
-            return
-          }
           voiceLogger.log(
             `[IGNORED] Channel #${textChannel.name} has no project directory configured`,
           )
@@ -677,9 +688,6 @@ export async function startDiscordBot({
         }
 
         const projectDirectory = channelConfig.directory
-
-        // Note: Mention mode is checked early in the handler (before permission check)
-        // to avoid sending permission errors to users who just didn't @mention the bot.
 
         discordLogger.log(`DIRECTORY: Found kimaki.directory: ${projectDirectory}`)
 
@@ -799,8 +807,7 @@ export async function startDiscordBot({
         await channelRuntime.enqueueIncoming({
           prompt: '',
           userId: message.author.id,
-          username:
-            message.member?.displayName || message.author.displayName,
+          username: message.member?.displayName || message.author.displayName,
           appId: currentAppId,
           preprocess: () => {
             return preprocessNewThreadMessage({

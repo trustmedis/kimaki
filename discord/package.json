@@ -1,5 +1,5 @@
 {
-  "name": "kimaki",
+  "name": "@trustmedis/kimaki",
   "module": "index.ts",
   "type": "module",
   "version": "0.4.78",
@@ -18,8 +18,11 @@
     "format": "oxfmt src",
     "sync-skills": "tsx scripts/sync-skills.ts"
   },
-  "repository": "https://github.com/remorses/kimaki",
+  "repository": "https://github.com/trustmedis/kimaki",
   "bin": "bin.js",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist",
     "src",
