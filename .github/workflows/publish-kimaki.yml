@@ -7,6 +7,7 @@ on:
       - 'kimaki-v*'
 
 permissions:
+  id-token: write
   contents: read
 
 jobs:
@@ -30,6 +31,9 @@ jobs:
           registry-url: https://registry.npmjs.org
           cache: pnpm
 
+      - name: Setup npm CLI for trusted publishing
+        run: npm install -g npm@^11.5.1
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -43,7 +47,11 @@ jobs:
           pnpm -C discord generate
           pnpm -C discord tsc
 
-      - name: Publish @trustmedis/kimaki
-        run: pnpm -C discord publish --no-git-checks --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Pack @trustmedis/kimaki
+        run: |
+          rm -rf tmp-publish
+          mkdir -p tmp-publish
+          pnpm -C discord pack --pack-destination ../tmp-publish
+
+      - name: Publish @trustmedis/kimaki with trusted publishing
+        run: npm publish ./tmp-publish/*.tgz --access public
